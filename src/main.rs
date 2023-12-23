@@ -1,5 +1,14 @@
+// mod r#move;
+// mod game;
+// mod piece;
+// mod board;
+// mod utils;
+// mod engine;
+
 use std::io;
-use rusty_engine::board::{Board, Move, PieceType};
+use crate::board::Board;
+use crate::piece::PieceType;
+use crate::r#move::Move;
 
 fn main() {
     let mut board = Board::new();

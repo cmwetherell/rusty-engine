@@ -1,334 +1,59 @@
-use std::collections::HashMap;
-use std::time::{Instant};
+use crate::piece::PieceType;
+use crate::r#move::Move;
+use crate::utils::{get_rank, get_file};
 
-const WHITE: bool = true;
-const BLACK: bool = false;
+pub const WHITE: bool = true;
+pub const BLACK: bool = false;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Board {
-    white_pawns: u64,
-    white_knights: u64,
-    white_bishops: u64,
-    white_rooks: u64,
-    white_queens: u64,
-    white_king: u64,
-    
-    black_pawns: u64,
-    black_knights: u64,
-    black_bishops: u64,
-    black_rooks: u64,
-    black_queens: u64,
-    black_king: u64,
+    pub white_pawns: u64,
+    pub white_knights: u64,
+    pub white_bishops: u64,
+    pub white_rooks: u64,
+    pub white_queens: u64,
+    pub white_king: u64,
 
-    en_passant: Option<u8>, // None if no en passant square, otherwise the square number (0-63)
-    castling_rights: u8,    // A 4-bit value representing castling rights; each bit corresponds to a possibility
-    side_to_move: bool,     // True for white, False for black
-    halfmove_clock: u8,     // Number of halfmoves since the last capture or pawn advance (for the fifty-move rule)
-    fullmove_number: u16,   // The number of the full move, it starts at 1, and is incremented after Black's move
-}
+    pub black_pawns: u64,
+    pub black_knights: u64,
+    pub black_bishops: u64,
+    pub black_rooks: u64,
+    pub black_queens: u64,
+    pub black_king: u64,
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Move {
-    from: u8,     // Square number 0-63 from which the piece is moved
-    to: u8,       // Square number 0-63 to which the piece is moved
-    promotion: Option<PieceType>, // None if not a promotion, otherwise the piece type to which the pawn is promoted
-    piece_type: PieceType
-    // Additional fields as necessary for en passant, castling, etc.
-}
-impl Move {
-    // Constructor method
-    pub fn new(from: u8, to: u8, piece_type: PieceType, promotion: Option<PieceType>) -> Move {
-        Move {
-            from,
-            to,
-            promotion,
-            piece_type,
-            // Initialize additional fields as necessary
-        }
-    }
+    pub en_passant: Option<u8>, // None if no en passant square, otherwise the square number (0-63)
+    pub castling_rights: u8,    // A 4-bit value representing castling rights; each bit corresponds to a possibility
+    pub side_to_move: bool,     // True for white, False for black
+    pub halfmove_clock: u8,     // Number of halfmoves since the last capture or pawn advance (for the fifty-move rule)
+    pub fullmove_number: u16,   // The number of the full move, it starts at 1, and is incremented after Black's move
 
-    // You might also want to provide getter methods to access private fields
-    pub fn from(&self) -> u8 {
-        self.from
-    }
+    //TODO: implement getter methods for all attributes instead of making them public
 
-    pub fn to(&self) -> u8 {
-        self.to
-    }
-
-    // get uci notation, e.g. e2e4
-    pub fn get_uci(&self) -> String {
-        let from_square = self.from;
-        let to_square = self.to;
-    
-        let from_file = (from_square % 8) as u8 + b'a'; // converting file to a-h
-        let from_rank = (from_square / 8) as u8 + 1;    // rank as 1-8
-        let to_file = (to_square % 8) as u8 + b'a';     // converting file to a-h
-        let to_rank = (to_square / 8) as u8 + 1;        // rank as 1-8
-    
-        let mut result = String::new();
-        result.push(from_file as char);
-        result.push_str(&from_rank.to_string()); // Convert rank number to string
-        result.push(to_file as char);
-        result.push_str(&to_rank.to_string());   // Convert rank number to string
-    
-        result
-    }
-}
-
-
-// Move scoring structure
-pub struct ScoredMove {
-    mv: Move,
-    score: i32,
-}
-
-impl ScoredMove {
-    fn new(mv: Move, score: i32) -> Self {
-        ScoredMove { mv, score }
-    }
 }
 
 #[derive(Clone, Copy)]
 pub struct UndoState {
-    captured_piece: Option<PieceType>, // The piece type that was captured, if any
-    en_passant: Option<u8>,            // The en passant square, if any
-    castling_rights: u8,               // The castling rights before the move
-    halfmove_clock: u8,                // The halfmove clock before the move
-    fullmove_number: u16,              // The fullmove number before the move
+    pub captured_piece: Option<PieceType>, // The piece type that was captured, if any
+    pub en_passant: Option<u8>,            // The en passant square, if any
+    pub castling_rights: u8,               // The castling rights before the move
+    pub halfmove_clock: u8,                // The halfmove clock before the move
+    pub fullmove_number: u16,              // The fullmove number before the move
     // Add any other state information that needs to be restored
 }
 
-#[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
-pub enum PieceType {
-    Pawn,
-    Knight,
-    Bishop,
-    Rook,
-    Queen,
-    King,
-}
-
-
-// Helper function to get the rank (0 to 7) from a square (0 to 63)
-fn get_rank(square: u8) -> u8 {
-    square / 8
-}
-
-// Helper function to get the file (0 to 7) from a square (0 to 63)
-fn get_file(square: u8) -> u8 {
-    square % 8
-}
-
 // Represents the result of a pawn move which may affect en passant
-struct PawnMoveResult {
-    en_passant: Option<u8>,
+pub struct PawnMoveResult {
+    pub en_passant: Option<u8>,
 }
 
 impl Board {
-    // Initializes the board to the starting position
-    pub fn new() -> Self {
-        Board {
-            white_pawns: 0xFF00, // 2nd rank
-            white_knights: 0x42, // b1 and g1
-            white_bishops: 0x24, // c1 and f1
-            white_rooks: 0x81,   // a1 and h1
-            white_queens: 0x8,   // d1
-            white_king: 0x10,    // e1
-            
-            black_pawns: 0xFF000000000000,   // 7th rank
-            black_knights: 0x4200000000000000, // b8 and g8
-            black_bishops: 0x2400000000000000, // c8 and f8
-            black_rooks: 0x8100000000000000,   // a8 and h8
-            black_queens: 0x800000000000000,   // d8
-            black_king: 0x1000000000000000,    // e8
-            
-            en_passant: None,
-            castling_rights: 0xF, // All castling rights available initially
-            side_to_move: WHITE,
-            halfmove_clock: 0,
-            fullmove_number: 1,
-        }
 
-    }
-
-    fn print_self(&self) {
+    pub fn print_self(&self) {
         println!("{:?}", self);
     }
 
-    pub fn make_move(&mut self, mv: Move) -> UndoState {
-
-        // Determine if the move is a pawn advance or a capture
-        let is_pawn_advance = mv.piece_type == PieceType::Pawn;
-        let is_capture = self.is_occupied_by_opponent(mv.to, self.side_to_move);
-        let is_en_passant_capture = is_pawn_advance && self.en_passant == Some(mv.to);
-
-        // Initialize captured_piece variable
-        let captured_piece = if is_capture {
-            // If it's a capture, get the type of the captured piece
-            Some(self.get_piece_type(mv.to))
-        } else if is_en_passant_capture {
-            // If it's an en passant capture, return pawn type
-            Some(PieceType::Pawn)
-        } else {
-            None
-        };
-
-        //save board state so we can undo it later. combined with Move, can fully undo move.
-        let undo_state = UndoState {
-            //TODO: Verify unmake move and undo state work appropriately with zobrist hashes
-            captured_piece: captured_piece,
-            en_passant: self.en_passant,
-            castling_rights: self.castling_rights,
-            halfmove_clock: self.halfmove_clock,
-            fullmove_number: self.fullmove_number,
-        };
-
-        // let from_mask = 1u64 << mv.from;
-        let to_mask = 1u64 << mv.to;
-
-        // Handle the halfmove clock with ternary operator
-        self.halfmove_clock = if is_pawn_advance || is_capture { 0 } else { self.halfmove_clock + 1 };
-
-        // Check if the 'to' square is occupied by an opponent's piece and capture it
-        if is_capture {
-            self.clear_square(mv.to);
-        }
-
-        // Clear the 'from' square
-        self.clear_square(mv.from);
-
-        // Set the 'to' square for the appropriate piece
-        match mv.piece_type {
-            PieceType::Pawn => {
-                // self.halfmove_clock = 0; // Reset the halfmove clock
-                if self.side_to_move == WHITE {
-                    self.white_pawns |= to_mask;
-                } else {
-                    self.black_pawns |= to_mask;
-                }
-            },
-
-            PieceType::Knight => {
-                if self.side_to_move == WHITE {
-                    self.white_knights |= to_mask;
-                } else {
-                    self.black_knights |= to_mask;
-                }
-            },
-
-            PieceType::Rook => {
-                if self.side_to_move == WHITE {
-                    self.white_rooks |= to_mask;
-                } else {
-                    self.black_rooks |= to_mask;
-                }
-            },
-
-            PieceType::Bishop => {
-                if self.side_to_move == WHITE {
-                    self.white_bishops |= to_mask;
-                } else {
-                    self.black_bishops |= to_mask;
-                }
-            },
-
-            PieceType::Queen => {
-                if self.side_to_move == WHITE {
-                    self.white_queens |= to_mask;
-                } else {
-                    self.black_queens |= to_mask;
-                }
-            },
-
-            PieceType::King => {
-                if self.side_to_move == WHITE {
-                    self.white_king |= to_mask;
-                } else {
-                    self.black_king |= to_mask;
-                }
-            },
-        }
-
-        // Handle castling move
-        if mv.piece_type == PieceType::King && mv.from.abs_diff(mv.to) == 2 {
-            self.handle_castling(mv.to);
-        }
-
-        // Handle castling rights
-        self.update_castling_rights(&mv);
-
-        // Handle en passant
-        if let Some(pawn_move) = self.handle_pawn_move(&mv) {
-            self.en_passant = pawn_move.en_passant;
-        } else {
-            self.en_passant = None;
-        }
-
-        // Handle potential promotion
-        if let Some(promotion) = mv.promotion {
-            self.promote_pawn(mv.to, promotion);
-        }
-
-        // Toggle the side to move
-        self.side_to_move = !self.side_to_move;
-
-        // Update the fullmove number if Black has moved
-        if self.side_to_move == WHITE {
-            self.fullmove_number += 1;
-        }
-
-        //print self
-        // self.print_self();
-        
-        // Return the undo state
-        undo_state
-    }
-
-    pub fn unmake_move(&mut self, mv: Move, undo_state: UndoState) {
-        //print self
-        // self.print_self();
-
-        self.clear_square(mv.to);
-
-        // Restore the captured piece, if any
-        if Some(mv.to) == undo_state.en_passant {
-            let captured_square = if self.side_to_move == WHITE { mv.to + 8 } else { mv.to - 8 };
-            self.set_square(captured_square, PieceType::Pawn);
-        } else if let Some(captured_piece) = undo_state.captured_piece {
-            self.set_square(mv.to, captured_piece);
-        } else {
-        }
-
-        // Toggle the side to move back
-        self.side_to_move = !self.side_to_move;
-
-        // Restore the previous state
-        self.en_passant = undo_state.en_passant;
-        self.castling_rights = undo_state.castling_rights;
-        self.halfmove_clock = undo_state.halfmove_clock;
-        self.fullmove_number = undo_state.fullmove_number;
-    
-        // Move the piece back to its original square
-        self.set_square(mv.from, mv.piece_type);
-    
-        // If the move was a castling move, move the rook back
-        if mv.piece_type == PieceType::King && (mv.from.abs_diff(mv.to) == 2) {
-            let (rook_from, rook_to) = match mv.to {
-                2 | 58 => (0, 3),   // Queen-side castling
-                6 | 62 => (7, 5),   // King-side castling
-                _ => panic!("Invalid castling move during unmake"),
-            };
-            let rook_from = if self.side_to_move == WHITE { rook_from } else { rook_from + 56 };
-            let rook_to = if self.side_to_move == WHITE { rook_to } else { rook_to + 56 };
-        
-            self.clear_square(rook_to); // TODO: this is probably unnecessary, since castling needs clear space beforehand
-            self.set_square(rook_from, PieceType::Rook);
-        }
-    }
-
     // Clears a square on the bitboards
-    fn clear_square(&mut self, square: u8) {
+    pub fn clear_square(&mut self, square: u8) {
         let mask = !(1u64 << square);
         
         // Clear square for white pieces
@@ -349,7 +74,7 @@ impl Board {
     }
 
     // Check if a square is occupied by an opponent's piece
-    fn is_occupied_by_opponent(&self, square: u8, side: bool) -> bool {
+    pub fn is_occupied_by_opponent(&self, square: u8, side: bool) -> bool {
         let mask = 1u64 << square;
         if side == WHITE {
             // Check black pieces
@@ -363,7 +88,7 @@ impl Board {
     }
 
     // Promote a pawn
-    fn promote_pawn(&mut self, square: u8, promotion: PieceType) {
+    pub fn promote_pawn(&mut self, square: u8, promotion: PieceType) {
         // Clear the pawn from the square
         self.clear_square(square);
 
@@ -406,7 +131,7 @@ impl Board {
     }
 
     // Handles the specifics of pawn moves, including double moves and en passant captures
-    fn handle_pawn_move(&mut self, mv: &Move) -> Option<PawnMoveResult> {
+    pub fn handle_pawn_move(&mut self, mv: &Move) -> Option<PawnMoveResult> {
         if mv.piece_type != PieceType::Pawn {
             return None;
         }
@@ -429,7 +154,7 @@ impl Board {
     }
 
     // Updates the castling rights given the current move
-    fn update_castling_rights(&mut self, mv: &Move) {
+    pub fn update_castling_rights(&mut self, mv: &Move) {
         // If the king moves, remove both castling rights for that color
         if mv.piece_type == PieceType::King {
             if self.side_to_move == WHITE {
@@ -461,13 +186,13 @@ impl Board {
         
     }
 
-    // Determine if a move is a capture
-    fn is_capture(&self, mv: &Move) -> bool {
-        self.is_occupied_by_opponent(mv.to, self.side_to_move)
-    }
+    // // Determine if a move is a capture
+    // fn is_capture(&self, mv: &Move) -> bool {
+    //     self.is_occupied_by_opponent(mv.to, self.side_to_move)
+    // }
 
     // Handles the specifics of castling moves
-    fn handle_castling(&mut self, to: u8) {
+    pub fn handle_castling(&mut self, to: u8) {
         let rook_from: u8;
         let rook_to: u8;
 
@@ -501,7 +226,7 @@ impl Board {
     }
 
     // Sets a square on the bitboards with the specified piece type
-    fn set_square(&mut self, square: u8, piece_type: PieceType) {
+    pub fn set_square(&mut self, square: u8, piece_type: PieceType) {
         let mask = 1u64 << square;
 
         match piece_type {
@@ -556,62 +281,6 @@ impl Board {
 
         }
     }
-
-    // A very simple evaluation function
-    pub fn evaluate(&self) -> i32 {
-        let white_material = self.bitboard_material(self.white_pawns) * 1 +
-                             self.bitboard_material(self.white_knights) * 3 +
-                             self.bitboard_material(self.white_bishops) * 3 +
-                             self.bitboard_material(self.white_rooks) * 5 +
-                             self.bitboard_material(self.white_queens) * 9;
-
-        let black_material = self.bitboard_material(self.black_pawns) * 1 +
-                             self.bitboard_material(self.black_knights) * 3 +
-                             self.bitboard_material(self.black_bishops) * 3 +
-                             self.bitboard_material(self.black_rooks) * 5 +
-                             self.bitboard_material(self.black_queens) * 9;
-
-        white_material - black_material
-    }
-
-    // Helper function to count the bits of a bitboard
-    fn bitboard_material(&self, bitboard: u64) -> i32 {
-        bitboard.count_ones() as i32
-    }
-
-    // // Checks if the game is over
-    // pub fn is_game_over(&self) -> bool {
-    //     // Check for checkmate or stalemate
-    //     if self.generate_legal_moves().is_empty() {
-    //         if self.is_in_check(self.side_to_move) {
-    //             println!("Checkmate!");
-    //         } else {
-    //             println!("Stalemate!");
-    //         }
-    //         return true;
-    //     }
-
-    //     // Check for fifty-move rule (this needs to be tracked after each move)
-    //     if self.halfmove_clock >= 100 {
-    //         println!("Draw by fifty-move rule");
-    //         return true;
-    //     }
-
-    //     // Check for threefold repetition (this requires a move history)
-    //     // ...
-
-    //     // Check for insufficient material (requires a more complex function)
-    //     // ...
-
-    //     false
-    // }
-
-    // // Stub for checking if the current side is in check
-    // // You'll need to implement actual check detection logic here
-    // fn is_in_check(&self, side: bool) -> bool {
-    //     // ...
-    //     false // Placeholder
-    // }
 
     // Generates all legal moves for the current position
     pub fn generate_legal_moves(&mut self) -> Vec<Move> {
@@ -1378,270 +1047,6 @@ impl Board {
         }
     }
 
-
-    // Entry point for the search with iterative deepening
-    pub fn search_moves(&mut self, n_moves: usize, max_depth: usize) -> Vec<ScoredMove> {
-        let mut best_moves: Vec<ScoredMove> = Vec::new();
-
-        for depth in 1..=max_depth {
-            let mut scored_moves = self.depth_first_search(depth);
-
-            // Sort moves by score
-            scored_moves.sort_by(|a, b| b.score.cmp(&a.score));
-
-            // Update the list of best moves if better moves are found at this depth
-            if !scored_moves.is_empty() {
-                best_moves = scored_moves.into_iter().take(n_moves).collect();
-            }
-
-            // Break early if the maximum depth is reached
-            if depth == max_depth {
-                break;
-            }
-        }
-
-        best_moves
-    }
-
-    // Depth-first search implementation
-    fn depth_first_search(&mut self, depth: usize) -> Vec<ScoredMove> {
-        let legal_moves = self.generate_legal_moves();
-        let mut scored_moves = Vec::new();
-
-        for mv in legal_moves {
-            let undo_state = self.make_move(mv);
-            let score = -self.minimax(depth - 1, -i32::MAX, i32::MAX);
-            self.unmake_move(mv, undo_state);
-
-            scored_moves.push(ScoredMove::new(mv, score));
-        }
-
-        scored_moves
-    }
-
-    // Minimax algorithm with alpha-beta pruning
-    fn minimax(&mut self, depth: usize, alpha: i32, beta: i32) -> i32 {
-        if depth == 0 {
-            return self.evaluate();
-        }
-
-        let mut alpha = alpha;
-        let legal_moves = self.generate_legal_moves();
-        if legal_moves.is_empty() {
-            return self.evaluate_checkmate_or_stalemate();
-        }
-
-        let mut best_score = -i32::MAX;
-        for mv in legal_moves {
-            let undo_state = self.make_move(mv);
-            let score = -self.minimax(depth - 1, -beta, -alpha);
-            self.unmake_move(mv, undo_state);
-
-            best_score = best_score.max(score);
-            alpha = alpha.max(score);
-
-            if alpha >= beta {
-                break; // Beta cutoff
-            }
-        }
-
-        best_score
-    }
-
-    // Helper method to evaluate the board for checkmate or stalemate
-    pub fn evaluate_checkmate_or_stalemate(&self) -> i32 {
-        if self.is_in_check(self.side_to_move) {
-            return -i32::MAX; // Checkmate
-        } else {
-            return 0; // Stalemate
-        }
-    }
-    
-    
-    pub fn perft(&mut self, depth: usize) {
-        let start_time = Instant::now();
-        let mut top_level_moves_count: HashMap<(u8, u8, Option<PieceType>), usize> = HashMap::new();
-    
-        let legal_moves = self.generate_legal_moves();
-        for mv in legal_moves {
-            let undo_state = self.make_move(mv);
-            let nodes_count = self.perft_helper(depth - 1);
-            top_level_moves_count.insert((mv.from, mv.to, mv.promotion), nodes_count);
-            self.unmake_move(mv, undo_state);
-        }
-    
-        let duration = start_time.elapsed();
-    
-        // Print the move counts for top-level moves
-        for ((from, to, promo), count) in &top_level_moves_count {
-            // println!("Top-level move from {} to {}: generates {} nodes", from, to, count);
-            // convert square to rank a-h and file 1-8
-            let from_rank = get_rank(*from);
-            let from_file = get_file(*from);
-            let to_rank = get_rank(*to);
-            let to_file = get_file(*to);
-            // convert file to char
-            let from_file_char = match from_file {
-                0 => 'a',
-                1 => 'b',
-                2 => 'c',
-                3 => 'd',
-                4 => 'e',
-                5 => 'f',
-                6 => 'g',
-                7 => 'h',
-                _ => panic!("Invalid file"),
-            };
-            let to_file_char = match to_file {
-                0 => 'a',
-                1 => 'b',
-                2 => 'c',
-                3 => 'd',
-                4 => 'e',
-                5 => 'f',
-                6 => 'g',
-                7 => 'h',
-                _ => panic!("Invalid file"),
-            };
-            let promo_char = match promo {
-                Some(PieceType::Queen) => 'q',
-                Some(PieceType::Rook) => 'r',
-                Some(PieceType::Bishop) => 'b',
-                Some(PieceType::Knight) => 'n',
-                None => ' ',
-                _ => panic!("Invalid promotion"),
-            };
-            println!("{}{}{}{}{}: {}", from_file_char, from_rank + 1, to_file_char, to_rank + 1, promo_char, count);
-        }
-
-        // sum all counts in top level move counts and print it
-        let mut total_nodes = 0;
-        for (_, count) in &top_level_moves_count {
-            total_nodes += count;
-        }
-        println!("Total nodes: {}", total_nodes);
-    
-        // Print the total time taken
-        println!("Time taken: {:?}", duration);
-    }
-    
-    fn perft_helper(&mut self, depth: usize) -> usize {
-        if depth == 0 {
-            return 1;
-        }
-    
-        let mut total_moves = 0;
-        let legal_moves = self.generate_legal_moves();
-    
-        for mv in legal_moves {
-            let undo_state = self.make_move(mv);
-            total_moves += self.perft_helper(depth - 1);
-            self.unmake_move(mv, undo_state);
-        }
-    
-        total_moves
-    }
-
-    pub fn set_pos(&mut self, fen: &str) {
-        let parts: Vec<&str> = fen.split_whitespace().collect();
-        if parts.len() != 6 {
-            panic!("Invalid FEN string");
-        }
-
-        self.reset_board(); // Clear the board or reset it to default state
-
-        self.set_pieces(parts[0]); // Parts[0] contains piece placement
-        self.side_to_move = if parts[1] == "w" { WHITE } else { BLACK };
-        self.set_castling_rights(parts[2]);
-        self.set_en_passant(parts[3]);
-        self.halfmove_clock = parts[4].parse().unwrap_or(0);
-        self.fullmove_number = parts[5].parse().unwrap_or(1);
-    }
-
-    fn reset_board(&mut self) {
-        // Reset the board to the default starting position
-        self.white_pawns = 0;
-        self.white_knights = 0;
-        self.white_bishops = 0;
-        self.white_rooks = 0;
-        self.white_queens = 0;
-        self.white_king = 0;
-        self.black_pawns = 0;
-        self.black_knights = 0;
-        self.black_bishops = 0;
-        self.black_rooks = 0;
-        self.black_queens = 0;
-        self.black_king = 0;
-        self.side_to_move = WHITE;
-        self.castling_rights = 0b1111;
-        self.en_passant = None;
-        self.halfmove_clock = 0;
-        self.fullmove_number = 1;
-    }
-
-    fn set_pieces(&mut self, pieces: &str) {
-        // Parse piece placement from the FEN and set the board
-
-        // Iterate over each rank
-        let mut rank = 7;
-        let mut file = 0;
-        for c in pieces.chars() {
-            if c == '/' {
-                rank -= 1;
-                file = 0;
-            } else if c.is_digit(10) {
-                file += c.to_digit(10).unwrap();
-            } else {
-                let square = rank * 8 + file;
-                let bitboard = 1u64 << square;
-                match c {
-                    'P' => self.white_pawns |= bitboard,
-                    'N' => self.white_knights |= bitboard,
-                    'B' => self.white_bishops |= bitboard,
-                    'R' => self.white_rooks |= bitboard,
-                    'Q' => self.white_queens |= bitboard,
-                    'K' => self.white_king |= bitboard,
-                    'p' => self.black_pawns |= bitboard,
-                    'n' => self.black_knights |= bitboard,
-                    'b' => self.black_bishops |= bitboard,
-                    'r' => self.black_rooks |= bitboard,
-                    'q' => self.black_queens |= bitboard,
-                    'k' => self.black_king |= bitboard,
-                    _ => panic!("Invalid FEN string"),
-                }
-                file += 1;
-            }
-        }
-
-    }
-
-    fn set_castling_rights(&mut self, rights: &str) {
-        // Set the castling rights from the FEN
-        self.castling_rights = 0;
-        for c in rights.chars() {
-            match c {
-                'K' => self.castling_rights |= 0b0001,
-                'Q' => self.castling_rights |= 0b0010,
-                'k' => self.castling_rights |= 0b0100,
-                'q' => self.castling_rights |= 0b1000,
-                '-' => break,
-                _ => panic!("Invalid FEN string"),
-            }
-        }
-    }
-
-    fn set_en_passant(&mut self, square: &str) {
-        // Set the en passant target square from the FEN
-        if square == "-" {
-            self.en_passant = None;
-        } else {
-            let file = square.chars().nth(0).unwrap() as i8 - 'a' as i8;
-            let rank = square.chars().nth(1).unwrap() as i8 - '1' as i8;
-            self.en_passant = Some((rank * 8 + file) as u8);
-        }
-    }
-
-    
     
     // Your other functions and implementations...
     
