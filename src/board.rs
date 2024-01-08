@@ -1,5 +1,5 @@
-use crate::piece::PieceType;
-use crate::r#move::Move;
+pub use crate::piece::PieceType;
+pub use crate::r#move::Move;
 use crate::utils::{get_rank, get_file};
 
 pub const WHITE: bool = true;
@@ -27,6 +27,11 @@ pub struct Board {
     pub halfmove_clock: u8,     // Number of halfmoves since the last capture or pawn advance (for the fifty-move rule)
     pub fullmove_number: u16,   // The number of the full move, it starts at 1, and is incremented after Black's move
 
+    // implement is_checkmate and is_draw
+
+    pub is_checkmate: bool,
+    pub is_draw: bool,
+
     //TODO: implement getter methods for all attributes instead of making them public
 
 }
@@ -38,6 +43,9 @@ pub struct UndoState {
     pub castling_rights: u8,               // The castling rights before the move
     pub halfmove_clock: u8,                // The halfmove clock before the move
     pub fullmove_number: u16,              // The fullmove number before the move
+    pub is_checkmate: bool,
+    pub is_draw: bool,
+
     // Add any other state information that needs to be restored
 }
 
@@ -282,10 +290,9 @@ impl Board {
         }
     }
 
-    // Generates all legal moves for the current position
-    pub fn generate_legal_moves(&mut self) -> Vec<Move> {
-        let initial_state = self.clone(); // Clone the initial state
-        //TODO: Remove board wrapping for all pieces
+    // Generates all pseudo-legal moves for the current position
+    // This function should not filter out moves that leave the king in check
+    pub fn generate_pseudo_legal_moves(&mut self) -> Vec<Move> {
         let mut moves: Vec<Move> = Vec::new();
 
         // Generate moves for each piece type
@@ -296,28 +303,24 @@ impl Board {
         moves.append(&mut self.generate_queen_moves());
         moves.append(&mut self.generate_king_moves());
 
-        // Filter out illegal moves
-        moves.retain(|&mv| {
-            let undo_state = self.make_move(mv);
-            let is_legal = !self.is_in_check(!self.side_to_move); // Check if the current side is in check
-            self.unmake_move(mv, undo_state);
-            is_legal
-        });
+        moves
+    }
 
-        if self != &initial_state {
-            // This will panic if the board states are not equal
-            println!("moves generated and applied and undone, but board state changed");
-            println!("{:?}", moves);
-            println!("new state board representation:");
-            self.print_board();
-            println!("new state {:?}", self);
-            println!("initial state board representation:");
-            initial_state.print_board();
-            println!("initial state {:?}", initial_state);
-            assert_eq!(self, &initial_state, "Board state changed after generate_legal_moves");
+    // Generates all legal moves for the current position
+    // This function filters out moves that leave the king in check
+    pub fn generate_legal_moves(&mut self) -> Vec<Move> {
+        let pseudo_legal_moves = self.generate_pseudo_legal_moves();
+        let mut legal_moves: Vec<Move> = Vec::new();
+
+        for mv in pseudo_legal_moves {
+            let undo_state = self.make_move(mv);
+            if !self.is_in_check(!self.side_to_move) {
+                legal_moves.push(mv);
+            }
+            self.unmake_move(mv, undo_state);
         }
 
-        moves
+        legal_moves
     }
 
     // Stub for checking if the current side is in check
@@ -969,6 +972,54 @@ impl Board {
             self.black_rooks | self.black_queens | self.black_king
         };
         occupied & mask != 0
+    }
+
+    // // Call this function after a move is made to update the checkmate and draw status
+    // pub fn update_game_status(&mut self) {
+    //     // Update checkmate status
+    //     self.is_checkmate = self.check_for_checkmate();
+
+    //     // Update draw status
+    //     self.is_draw = self.check_for_draw();
+    // }
+
+    // Determine if the current position is checkmate
+    pub fn check_for_checkmate(&mut self) -> bool {
+        // First, check if the current side is in check
+        if !self.is_in_check(self.side_to_move) {
+            return false;
+        }
+
+        // Generate all legal moves for the current side
+        let legal_moves = self.generate_legal_moves();
+
+        // If there are no legal moves, it's checkmate
+        legal_moves.is_empty()
+    }
+
+    // Determine if the current position is a draw
+    pub fn check_for_draw(&mut self) -> bool {
+        // Check for insufficient material
+        // if self.is_insufficient_material() {
+        //     return true;
+        // }
+
+        // Check for stalemate
+        if !self.is_in_check(self.side_to_move) && self.generate_legal_moves().is_empty() {
+            return true;
+        }
+
+        // // Check for threefold repetition
+        // if self.is_threefold_repetition() {
+        //     return true;
+        // }
+
+        // Check for fifty-move rule
+        if self.halfmove_clock >= 100 {
+            return true;
+        }
+
+        false
     }
 
     // Method to print the board

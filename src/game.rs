@@ -1,8 +1,10 @@
 // game.rs
 
 use crate::board::{ Board, UndoState, WHITE, BLACK };
-use crate::r#move::{Move};
+use crate::r#move::Move;
 use crate::piece::PieceType;
+
+use std::cmp;
 
 
 impl Board {
@@ -29,6 +31,8 @@ impl Board {
             side_to_move: WHITE,
             halfmove_clock: 0,
             fullmove_number: 1,
+            is_checkmate: false,
+            is_draw: false,
         }
 
     }
@@ -59,13 +63,16 @@ impl Board {
             castling_rights: self.castling_rights,
             halfmove_clock: self.halfmove_clock,
             fullmove_number: self.fullmove_number,
+            is_checkmate: self.is_checkmate,
+            is_draw: self.is_draw,
         };
 
         // let from_mask = 1u64 << mv.from;
         let to_mask = 1u64 << mv.to;
 
         // Handle the halfmove clock with ternary operator
-        self.halfmove_clock = if is_pawn_advance || is_capture { 0 } else { self.halfmove_clock + 1 };
+        let next_halfmove = cmp::min(100, self.halfmove_clock + 1); //todo: remove this line
+        self.halfmove_clock = if is_pawn_advance || is_capture { 0 } else { next_halfmove };
 
         // Check if the 'to' square is occupied by an opponent's piece and capture it
         if is_capture {
@@ -154,9 +161,6 @@ impl Board {
         if self.side_to_move == WHITE {
             self.fullmove_number += 1;
         }
-
-        //print self
-        // self.print_self();
         
         // Return the undo state
         undo_state
@@ -185,6 +189,8 @@ impl Board {
         self.castling_rights = undo_state.castling_rights;
         self.halfmove_clock = undo_state.halfmove_clock;
         self.fullmove_number = undo_state.fullmove_number;
+        self.is_checkmate = undo_state.is_checkmate;
+        self.is_draw = undo_state.is_draw;
     
         // Move the piece back to its original square
         self.set_square(mv.from, mv.piece_type);

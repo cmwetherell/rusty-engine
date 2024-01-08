@@ -1,37 +1,60 @@
 // engine.rs
+//TODO: Make sure alpha beta pruning is set up corerctly
 use std::time::Instant;
 use std::collections::HashMap;
 
 use crate::board::Board;
-use crate::r#move::{Move, ScoredMove};
+use crate::r#move::ScoredMove;
 use crate::piece::PieceType;
 use crate::utils::{get_rank, get_file};
 
+use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
+
+#[derive(Clone, Debug)]
 pub struct Engine {
+    board: Board,
     // Engine-specific fields, if any
 }
 
 impl Engine {
     pub fn new() -> Self {
         // Initialize the engine
-        Engine {
-            // ...
+        Self {
+            board: Board::new(),
+        }
+    }
+
+    pub fn with_board(board: Option<Board>) -> Self {
+        match board {
+            Some(existing_board) => Self { board: existing_board },
+            None => Self::new(),
         }
     }
 
     // A very simple evaluation function
-    pub fn evaluate(&self) -> i32 {
-        let white_material = self.bitboard_material(self.white_pawns) * 1 +
-                                self.bitboard_material(self.white_knights) * 3 +
-                                self.bitboard_material(self.white_bishops) * 3 +
-                                self.bitboard_material(self.white_rooks) * 5 +
-                                self.bitboard_material(self.white_queens) * 9;
+    pub fn evaluate(&mut self) -> i32 {
+        // Check for terminal conditions first
+        if self.board.check_for_checkmate() {
+            return if self.board.side_to_move == true {
+                i32::MIN // Checkmate against White
+            } else {
+                i32::MAX // Checkmate against Black
+            };
+        } else if self.board.check_for_draw() {
+            return 0; // Draw
+        }
+        let white_material = self.bitboard_material(self.board.white_pawns) * 1 +
+                                self.bitboard_material(self.board.white_knights) * 3 +
+                                self.bitboard_material(self.board.white_bishops) * 3 +
+                                self.bitboard_material(self.board.white_rooks) * 5 +
+                                self.bitboard_material(self.board.white_queens) * 9;
 
-        let black_material = self.bitboard_material(self.black_pawns) * 1 +
-                                self.bitboard_material(self.black_knights) * 3 +
-                                self.bitboard_material(self.black_bishops) * 3 +
-                                self.bitboard_material(self.black_rooks) * 5 +
-                                self.bitboard_material(self.black_queens) * 9;
+        let black_material = self.bitboard_material(self.board.black_pawns) * 1 +
+                                self.bitboard_material(self.board.black_knights) * 3 +
+                                self.bitboard_material(self.board.black_bishops) * 3 +
+                                self.bitboard_material(self.board.black_rooks) * 5 +
+                                self.bitboard_material(self.board.black_queens) * 9;
 
         white_material - black_material
     }
@@ -46,7 +69,7 @@ impl Engine {
         let mut best_moves: Vec<ScoredMove> = Vec::new();
 
         for depth in 1..=max_depth {
-            let mut scored_moves = self.depth_first_search(depth);
+            let mut scored_moves = self.depth_first_search_parallel(depth);
 
             // Sort moves by score
             scored_moves.sort_by(|a, b| b.score.cmp(&a.score));
@@ -55,6 +78,8 @@ impl Engine {
             if !scored_moves.is_empty() {
                 best_moves = scored_moves.into_iter().take(n_moves).collect();
             }
+
+            println!("Depth: {}, Best moves: {:?}", depth, best_moves);
 
             // Break early if the maximum depth is reached
             if depth == max_depth {
@@ -65,18 +90,37 @@ impl Engine {
         best_moves
     }
 
-    // Depth-first search implementation
-    fn depth_first_search(&mut self, depth: usize) -> Vec<ScoredMove> {
-        let legal_moves = self.generate_legal_moves();
-        let mut scored_moves = Vec::new();
+    // // Depth-first search implementation
+    // fn depth_first_search(&mut self, depth: usize) -> Vec<ScoredMove> {
+    //     let legal_moves = self.board.generate_legal_moves();
+    //     let mut scored_moves = Vec::new();
 
-        for mv in legal_moves {
-            let undo_state = self.make_move(mv);
-            let score = -self.minimax(depth - 1, -i32::MAX, i32::MAX);
-            self.unmake_move(mv, undo_state);
+    //     for mv in legal_moves {
+    //         let undo_state = self.board.make_move(mv);
+    //         let score = -self.minimax(depth - 1, -i32::MAX, i32::MAX);
+    //         self.board.unmake_move(mv, undo_state);
 
-            scored_moves.push(ScoredMove::new(mv, score));
-        }
+    //         scored_moves.push(ScoredMove::new(mv, score));
+    //     }
+
+    //     scored_moves
+    // }
+
+    // Parallel depth-first search implementation
+    fn depth_first_search_parallel(&mut self, depth: usize) -> Vec<ScoredMove> {
+        let legal_moves = self.board.generate_legal_moves();
+
+        let pool = ThreadPoolBuilder::new().build().unwrap();
+
+        let scored_moves: Vec<ScoredMove> = pool.install(|| {
+            legal_moves.par_iter().map(|&mv| {
+                let mut cloned_engine = self.clone();
+                let undo_state = cloned_engine.board.make_move(mv);
+                let score = cloned_engine.minimax(depth - 1, -i32::MAX, i32::MAX);
+                cloned_engine.board.unmake_move(mv, undo_state);
+                ScoredMove::new(mv, score)
+            }).collect()
+        });
 
         scored_moves
     }
@@ -88,16 +132,21 @@ impl Engine {
         }
 
         let mut alpha = alpha;
-        let legal_moves = self.generate_legal_moves();
-        if legal_moves.is_empty() {
-            return self.evaluate_checkmate_or_stalemate();
-        }
+        let legal_moves = self.board.generate_legal_moves();
 
         let mut best_score = -i32::MAX;
         for mv in legal_moves {
-            let undo_state = self.make_move(mv);
-            let score = -self.minimax(depth - 1, -beta, -alpha);
-            self.unmake_move(mv, undo_state);
+            let undo_state = self.board.make_move(mv);
+            
+            // Get score from minimax and safely negate it
+            let mut score = self.minimax(depth - 1, -alpha, -beta);
+            if score == i32::MIN {
+                score = i32::MAX; // or handle this some other way
+            } else {
+                score = -score;
+            }
+
+            self.board.unmake_move(mv, undo_state);
 
             best_score = best_score.max(score);
             alpha = alpha.max(score);
@@ -110,26 +159,27 @@ impl Engine {
         best_score
     }
 
-    // Helper method to evaluate the board for checkmate or stalemate
-    pub fn evaluate_checkmate_or_stalemate(&self) -> i32 {
-        if self.is_in_check(self.side_to_move) {
-            return -i32::MAX; // Checkmate
-        } else {
-            return 0; // Stalemate
-        }
-    }
+    // // Helper method to evaluate the board for checkmate or stalemate
+    // pub fn evaluate_checkmate_or_stalemate(&self, current_depth: i32) -> i32 {
+    //     //TODO: is this right?
+    //     if self.board.is_in_check(self.board.side_to_move) {
+    //         return i32::MAX - 1000 + current_depth // Checkmate
+    //     } else {
+    //         return 0; // Stalemate
+    //     }
+    // }
     
     
     pub fn perft(&mut self, depth: usize) {
         let start_time = Instant::now();
         let mut top_level_moves_count: HashMap<(u8, u8, Option<PieceType>), usize> = HashMap::new();
     
-        let legal_moves = self.generate_legal_moves();
+        let legal_moves = self.board.generate_legal_moves();
         for mv in legal_moves {
-            let undo_state = self.make_move(mv);
+            let undo_state = self.board.make_move(mv);
             let nodes_count = self.perft_helper(depth - 1);
             top_level_moves_count.insert((mv.from, mv.to, mv.promotion), nodes_count);
-            self.unmake_move(mv, undo_state);
+            self.board.unmake_move(mv, undo_state);
         }
     
         let duration = start_time.elapsed();
@@ -193,12 +243,12 @@ impl Engine {
         }
     
         let mut total_moves = 0;
-        let legal_moves = self.generate_legal_moves();
+        let legal_moves = self.board.generate_legal_moves();
     
         for mv in legal_moves {
-            let undo_state = self.make_move(mv);
+            let undo_state = self.board.make_move(mv);
             total_moves += self.perft_helper(depth - 1);
-            self.unmake_move(mv, undo_state);
+            self.board.unmake_move(mv, undo_state);
         }
     
         total_moves

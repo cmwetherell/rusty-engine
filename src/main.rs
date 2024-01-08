@@ -1,14 +1,7 @@
-// mod r#move;
-// mod game;
-// mod piece;
-// mod board;
-// mod utils;
-// mod engine;
-
 use std::io;
-use crate::board::Board;
-use crate::piece::PieceType;
-use crate::r#move::Move;
+use rusty_engine::board::{Board, Move, PieceType};
+use rusty_engine::engine::Engine;
+use rusty_engine::r#move::ScoredMove;
 
 fn main() {
     let mut board = Board::new();
@@ -17,6 +10,7 @@ fn main() {
     // board.set_pos("rnbqkbnr/p5pp/8/1ppppp2/3PP3/2N1BQ2/PPP2PPP/R3KBNR w KQkq - 0 6");
     // board.set_pos("rnbqkbnr/p5pp/8/1ppppp2/3PP3/2N1BQ2/PPP2PPP/RB2K2R w KQkq - 0 6");
     // board.set_pos("r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1");
+    board.set_pos("k7/3Q4/1K6/8/8/8/8/8 b - - 0 1"); // mate in 1
     // board.set_pos("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1");
     loop {
         board.print_board();
@@ -46,13 +40,21 @@ fn main() {
         } else if trimmed_input.starts_with("perft") {
             if let Some(depth_str) = trimmed_input.split_whitespace().nth(1) {
                 if let Ok(depth) = depth_str.parse::<usize>() {
-                    board.perft(depth);
+                    //create new engine with current board
+                    let mut engine = Engine::with_board(Some(board.clone()));
+                    engine.perft(depth);
                 } else {
                     println!("Invalid depth. Please provide a numeric depth value.");
                 }
             } else {
                 println!("Please provide a depth for perft testing.");
             }
+        } else if trimmed_input.starts_with("go") {
+            //create new engine with current board
+            let depth: usize = trimmed_input.split_whitespace().nth(1).unwrap().parse().unwrap();
+            let mut engine: Engine = Engine::with_board(Some(board.clone()));
+            let search: Vec<ScoredMove> = engine.search_moves(1, depth);
+            println!("Search: {:?}", search);
         } else if let Some(mv) = parse_move(trimmed_input, board.clone()) {
             // Check if move is in valid moves, else print error
             if valid_moves.contains(&mv) {
@@ -65,8 +67,6 @@ fn main() {
         }
     }
 }
-
-// Add your parse_move function and other relevant code here
 
 
 fn parse_move(input: &str, board: Board) -> Option<Move> {

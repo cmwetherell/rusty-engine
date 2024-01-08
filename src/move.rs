@@ -43,6 +43,7 @@ impl Move {
 }
 
 // Move scoring structure
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScoredMove {
     pub mv: Move,
     pub score: i32,
@@ -53,6 +54,5 @@ impl ScoredMove {
     pub fn new(mv: Move, score: i32) -> Self {
         Self { mv, score }
     }
-
-    // Additional methods for ScoredMove as necessary
+    
 }
